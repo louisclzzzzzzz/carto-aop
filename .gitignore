@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+bin/
+lib/
+include/
+share/
+
+# Logs
+*.log
+ao_classifier_*.log
+
+# Project specific results
+ao_plan_*.json
+ao_plan_*.md
+ao_report_*.md
+AO24_flat_randomized/
+dce_marly_organized/
+dce_complets_tree.txt
+.Rhistory
+
+# Data folders (too large for git usually)
+dce_marly/
+fake_ao_test/
+fake_ao_test2/
+AO24/
+AO24_random/
+*.zip
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Env
+.env
+.env.example
