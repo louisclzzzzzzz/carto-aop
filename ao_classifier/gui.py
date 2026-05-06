@@ -18,12 +18,15 @@ if str(_PROJECT_ROOT) not in sys.path:
 import pandas as pd
 import streamlit as st
 
-from ao_classifier.classifier import check_ollama, classify_all
+from ao_classifier.classifier import check_gemini, check_ollama, classify_all
 from ao_classifier.config import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_MODEL,
+    GEMINI_DEFAULT_MODEL,
+    GEMINI_MODELS,
     OLLAMA_BASE_URL,
+    OLLAMA_MODELS,
 )
 from ao_classifier.extractor import enrich_files
 from ao_classifier.planner import build_plan
@@ -42,7 +45,7 @@ st.set_page_config(
 def extract_zip(uploaded_file, dest: Path) -> Path:
     """Décompresse le ZIP dans dest et retourne le dossier racine extrait."""
     dest.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(io.BytesIO(uploaded_file.getvalue())) as zf:
+    with zipfile.ZipFile(uploaded_file) as zf:
         zf.extractall(dest)
 
     # Si un seul dossier au premier niveau, on l'utilise comme racine
@@ -52,7 +55,14 @@ def extract_zip(uploaded_file, dest: Path) -> Path:
     return dest
 
 
-def run_pipeline(input_folder: Path, model: str, batch_size: int, threshold: float):
+def run_pipeline(
+    input_folder: Path,
+    model: str,
+    batch_size: int,
+    threshold: float,
+    provider: str = "ollama",
+    gemini_api_key: str | None = None,
+):
     """Exécute le pipeline complet et retourne (entries, output_root)."""
     output_root = input_folder.parent / f"{input_folder.name}_organized"
 
@@ -68,6 +78,8 @@ def run_pipeline(input_folder: Path, model: str, batch_size: int, threshold: flo
         base_url=OLLAMA_BASE_URL,
         batch_size=batch_size,
         confidence_threshold=threshold,
+        provider=provider,
+        gemini_api_key=gemini_api_key,
     )
 
     entries = build_plan(results, output_root, threshold)
@@ -117,11 +129,34 @@ st.caption("Dépose un dossier ZIP d'appel d'offres, l'IA propose la réorganisa
 
 with st.sidebar:
     st.header("Paramètres")
-    model = st.selectbox(
-        "Modèle Ollama",
-        ["qwen2.5-coder:7b", "qwen2.5:7b", "mistral:7b", "llama3.2:3b"],
+
+    provider = st.selectbox(
+        "Fournisseur LLM",
+        ["Ollama (local)", "Gemini (cloud)"],
         index=0,
     )
+    use_gemini = provider == "Gemini (cloud)"
+
+    if use_gemini:
+        model = st.selectbox(
+            "Modèle Gemini",
+            GEMINI_MODELS,
+            index=GEMINI_MODELS.index(GEMINI_DEFAULT_MODEL),
+        )
+        gemini_api_key = st.text_input(
+            "Clef API Gemini",
+            type="password",
+            placeholder="AIza...",
+            help="Créer une clef sur https://aistudio.google.com/app/apikey",
+        )
+    else:
+        model = st.selectbox(
+            "Modèle Ollama",
+            OLLAMA_MODELS,
+            index=0,
+        )
+        gemini_api_key = None
+
     batch_size = st.slider("Taille de batch", 1, 10, DEFAULT_BATCH_SIZE)
     threshold = st.slider(
         "Seuil de confiance",
@@ -129,15 +164,29 @@ with st.sidebar:
     )
 
     st.divider()
-    if check_ollama(OLLAMA_BASE_URL):
-        st.success("✓ Ollama accessible")
+    if use_gemini:
+        if gemini_api_key:
+            if check_gemini(gemini_api_key):
+                st.success("✓ Clef Gemini valide")
+            else:
+                st.error("✗ Clef Gemini invalide ou réseau inaccessible")
+        else:
+            st.warning("Saisir une clef API Gemini")
     else:
-        st.error("✗ Ollama injoignable\n\n`ollama serve`")
+        if check_ollama(OLLAMA_BASE_URL):
+            st.success("✓ Ollama accessible")
+        else:
+            st.error("✗ Ollama injoignable\n\n`ollama serve`")
 
+_upload_help = (
+    "Le contenu sera analysé localement, rien n'est envoyé sur internet."
+    if not use_gemini
+    else "Le contenu sera envoyé à l'API Gemini (Google) pour classification."
+)
 uploaded = st.file_uploader(
     "Glisse-dépose un ZIP",
     type=["zip"],
-    help="Le contenu sera analysé localement, rien n'est envoyé sur internet.",
+    help=_upload_help,
 )
 
 if uploaded is None:
@@ -166,6 +215,8 @@ with tempfile.TemporaryDirectory(prefix="ao_gui_") as tmp:
         try:
             entries, output_root = run_pipeline(
                 input_folder, model, batch_size, threshold,
+                provider="gemini" if use_gemini else "ollama",
+                gemini_api_key=gemini_api_key,
             )
         except Exception as exc:
             st.error(f"Erreur pendant l'analyse : {exc}")

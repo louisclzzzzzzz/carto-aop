@@ -11,6 +11,24 @@ LLM_TIMEOUT_SECONDS = 30
 LLM_MAX_RETRIES = 2
 CONTENT_SAMPLE_MAX_CHARS = 1500
 
+# Gemini
+GEMINI_DEFAULT_MODEL = "gemini-1.5-flash"
+GEMINI_MODELS = [
+    "gemini-1.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-pro",
+    "gemini-2.5-flash-lite",
+    "gemma-3-27b-it",
+    "gemma-3-12b-it",
+    "gemma-3-4b-it",
+]
+OLLAMA_MODELS = [
+    "qwen2.5-coder:7b",
+    "qwen2.5:7b",
+    "mistral:7b",
+    "llama3.2:3b",
+]
+
 # Fichiers système à ignorer
 IGNORED_FILENAMES = {
     "thumbs.db", ".ds_store", "desktop.ini", "ehthumbs.db",

@@ -1,4 +1,4 @@
-"""Appel Ollama pour classement LLM des fichiers, par batch de 5."""
+"""Classement LLM des fichiers — backends Ollama et Gemini."""
 
 import json
 import logging
@@ -14,6 +14,7 @@ from ao_classifier.config import (
     DEMAT_EXTENSIONS,
     DEFAULT_BATCH_SIZE,
     DEFAULT_MODEL,
+    GEMINI_DEFAULT_MODEL,
     GLOSSAIRE,
     LLM_MAX_RETRIES,
     LLM_TIMEOUT_SECONDS,
@@ -43,6 +44,29 @@ def check_ollama(base_url: str = OLLAMA_BASE_URL) -> bool:
         return r.status_code == 200
     except requests.RequestException:
         return False
+
+
+def check_gemini(api_key: str) -> bool:
+    """Vérifie que la clef API Gemini est valide."""
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        # Appel léger : liste les modèles disponibles
+        next(iter(genai.list_models()))
+        return True
+    except Exception:
+        return False
+
+
+def _call_gemini(prompt: str, model: str, api_key: str) -> str:
+    import google.generativeai as genai
+    genai.configure(api_key=api_key)
+    m = genai.GenerativeModel(model)
+    response = m.generate_content(
+        prompt,
+        generation_config=genai.types.GenerationConfig(temperature=0.1),
+    )
+    return response.text
 
 
 def _build_prompt(batch: list[FileInfo], arbo_template_text: str | None = None) -> str:
@@ -127,13 +151,18 @@ def _classify_batch(
     base_url: str,
     confidence_threshold: float,
     arbo_template_text: str | None = None,
+    provider: str = "ollama",
+    gemini_api_key: str | None = None,
 ) -> list[ClassificationResult]:
     prompt = _build_prompt(batch, arbo_template_text)
     raw = ""
 
     for attempt in range(1, LLM_MAX_RETRIES + 2):
         try:
-            raw = _call_ollama(prompt, model, base_url)
+            if provider == "gemini":
+                raw = _call_gemini(prompt, model, gemini_api_key or "")
+            else:
+                raw = _call_ollama(prompt, model, base_url)
             break
         except requests.Timeout:
             logger.warning("Timeout LLM (tentative %d/%d)", attempt, LLM_MAX_RETRIES + 1)
@@ -141,6 +170,9 @@ def _classify_batch(
                 time.sleep(2 ** attempt)
         except requests.RequestException as e:
             logger.error("Erreur Ollama : %s", e)
+            break
+        except Exception as e:
+            logger.error("Erreur LLM (%s) : %s", provider, e)
             break
 
     # Parsing JSON — le LLM peut renvoyer {"files": [...]} ou directement [...]
@@ -233,8 +265,10 @@ def classify_all(
     base_url: str = OLLAMA_BASE_URL,
     batch_size: int = DEFAULT_BATCH_SIZE,
     confidence_threshold: float = 0.7,
+    provider: str = "ollama",
+    gemini_api_key: str | None = None,
 ) -> list[ClassificationResult]:
-    """Classifie tous les fichiers via Ollama par batchs."""
+    """Classifie tous les fichiers via Ollama ou Gemini par batchs."""
     results: list[ClassificationResult] = []
 
     # Les doublons ne passent pas par le LLM
@@ -261,7 +295,10 @@ def classify_all(
             "Batch %d/%d — %d fichier(s)",
             idx, total, len(batch),
         )
-        batch_results = _classify_batch(batch, model, base_url, confidence_threshold)
+        batch_results = _classify_batch(
+            batch, model, base_url, confidence_threshold,
+            provider=provider, gemini_api_key=gemini_api_key,
+        )
         results.extend(batch_results)
 
     return results
