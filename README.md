@@ -1,157 +1,151 @@
-# Carto AO
+# AO Classifier
 
-Outil de classification automatique de dossiers d'appels d'offres (AO) par LLM.  
-Supporte deux backends : **Ollama** (local, aucune donnée envoyée) et **Gemini** (cloud, API Google).
+> LLM-powered tool that automatically sorts and renames the documents inside a French construction-tender (Appel d'Offres) archive into a clean, standardised folder structure.
+
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.30%2B-FF4B4B?logo=streamlit&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama-local%20LLM-black?logo=ollama&logoColor=white)
+![Gemini](https://img.shields.io/badge/Gemini-Google%20AI-4285F4?logo=google&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
+
+---
+
+## What it does
+
+Construction project managers receive tender packages (DCE) as disorganised ZIP archives — dozens of PDFs, DOCX files, and spreadsheets with cryptic names. AO Classifier:
+
+- Extracts and reads every document (PDF, DOCX, XLSX, nested ZIPs)
+- Sends batches to an LLM (local or cloud) to identify each file's type
+- Assigns each file a target folder and a suggested human-readable name
+- Produces a structured reorganisation plan (JSON + Markdown report)
+- Applies the plan with a `copy` or `move` operation — source files are never touched by default
+
+## Key features
+
+- **Privacy-first option** — run fully offline with Ollama; no document content leaves your machine
+- **Multi-backend** — Ollama (local), Gemini (Google AI Studio), or Mistral
+- **Streamlit GUI** — drag-and-drop ZIP, review results in a table, export CSV/JSON
+- **CLI** — scriptable, supports `dry-run` / `copy` / `move` modes
+- **Evaluation tooling** — scripts to scramble a reference folder and measure classifier accuracy
+
+---
+
+## Project structure
+
+```
+ao_classifier/       # main Python package (pipeline)
+  __main__.py        # CLI entry point
+  config.py          # folder taxonomy, LLM constants
+  scanner.py         # recursive walk, MD5 dedup
+  extractor.py       # PDF / DOCX / XLSX / archive text extraction
+  classifier.py      # LLM calls (Ollama / Gemini / Mistral)
+  planner.py         # build reorganisation plan
+  reporter.py        # Markdown report + ASCII tree
+  executor.py        # apply plan, write audit log
+  gui.py             # Streamlit front-end
+scripts/
+  randomize_folder.py   # scramble a reference folder for evaluation
+  evaluate.py           # compare classifier output vs. ground truth
+  generate_fake_ao.py   # generate synthetic test data
+requirements.txt
+.env.example
+```
 
 ---
 
 ## Installation
 
-### macOS / Linux
-
 ```bash
+git clone <repo-url>
+cd classifier_aop
+
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate          # Windows: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-### Windows (PowerShell)
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-> Si PowerShell bloque l'exécution de scripts :
+> **Windows note:** if PowerShell blocks script execution, run:
 > ```powershell
 > Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 > ```
 
 ---
 
-## Lancer l'interface graphique
+## Usage
 
-### macOS / Linux
+### Streamlit GUI
 
 ```bash
 source .venv/bin/activate
 streamlit run ao_classifier/gui.py
+# opens http://localhost:8501
 ```
 
-### Windows (PowerShell)
+Drop a ZIP into the interface, pick your LLM backend in the sidebar, and click **Run analysis**.
 
-```powershell
-.\.venv\Scripts\Activate.ps1
-streamlit run ao_classifier/gui.py
+### CLI
+
+```bash
+# Dry run — preview only, no files touched
+python -m ao_classifier ./my_tender_folder --mode dry-run
+
+# Copy files into the new structure (safe default)
+python -m ao_classifier ./my_tender_folder --mode copy --model qwen2.5-coder:7b
+
+# Move files (destructive — explicit flag required)
+python -m ao_classifier ./my_tender_folder --mode move --provider gemini
 ```
-
-L'interface s'ouvre sur `http://localhost:8501`.
 
 ---
 
-## Utilisation de l'interface
+## LLM backends
 
-### 1. Choisir le fournisseur LLM (sidebar)
-
-| Fournisseur | Prérequis | Données envoyées |
+| Backend | Privacy | Requirement |
 |---|---|---|
-| **Ollama (local)** | Ollama installé et `ollama serve` lancé | Aucune — 100% local |
-| **Gemini (cloud)** | Clef API Google AI Studio | Contenu des fichiers envoyé à Google |
+| **Ollama (local)** | 100% local, no data sent | `ollama serve` + `ollama pull qwen2.5-coder:7b` |
+| **Gemini** | Content sent to Google | `GEMINI_API_KEY` in `.env` or GUI sidebar |
+| **Mistral** | Content sent to Mistral | `MISTRAL_API_KEY` in `.env` |
 
-**Ollama** — sélectionner le modèle (`qwen2.5-coder:7b`, `mistral:7b`…) et vérifier le statut ✓ en bas de la sidebar.
+Copy `.env.example` to `.env` and fill in your keys for cloud backends.
 
-**Gemini** — saisir la clef API (`AIza...`). Créer une clef sur [Google AI Studio](https://aistudio.google.com/app/apikey). Modèles disponibles : `gemini-1.5-flash`, `gemini-2.0-flash`, `gemini-1.5-pro`, `gemma-3-27b-it`…
-
-### 2. Régler les paramètres
-
-- **Taille de batch** : nombre de fichiers envoyés par appel LLM (1–10). Réduire si le modèle répond mal.
-- **Seuil de confiance** : fichiers en dessous du seuil → dossier `À TRIER`.
-
-### 3. Déposer un ZIP et lancer l'analyse
-
-Glisser-déposer un ZIP du dossier AO (jusqu'à **1 Go**). Cliquer sur **Lancer l'analyse**.
-
-L'interface affiche :
-- Un tableau de tous les fichiers avec dossier cible, nom suggéré, confiance et action
-- La répartition par dossier (graphique)
-- L'arborescence proposée
-- Les fichiers à réviser manuellement et les doublons détectés
-
-### 4. Exporter
-
-- **CSV** : listing complet des classements
-- **JSON** : plan de réorganisation structuré
-
----
-
-## CLI (sans interface)
-
-### macOS / Linux
+### Installing Ollama
 
 ```bash
-source .venv/bin/activate
-python -m ao_classifier ./mon_dossier_ao --mode dry-run
-python -m ao_classifier ./mon_dossier_ao --mode copy --model mistral:7b
-```
-
-### Windows (PowerShell)
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-python -m ao_classifier .\mon_dossier_ao --mode dry-run
-python -m ao_classifier .\mon_dossier_ao --mode copy --model mistral:7b
-```
-
-Modes disponibles : `dry-run` (simulation), `copy` (copie les fichiers), `move` (déplace les fichiers).
-
----
-
-## Évaluation de la qualité (optionnel)
-
-Pour mesurer la précision du classifieur sur un dossier dont on connaît la bonne organisation :
-
-### 1. Randomiser le dossier de référence
-
-```bash
-# macOS / Linux
-python randomize_folder.py AO24
-
-# Windows
-python randomize_folder.py AO24
-```
-
-Produit `AO24_random/` (noms aléatoires, invisible au LLM) et `AO24_mapping.json` (correspondance).
-
-### 2. Classer le dossier randomisé
-
-Déposer `AO24_random.zip` dans l'interface ou via CLI. Récupérer le fichier `ao_plan_TIMESTAMP.json`.
-
-### 3. Évaluer
-
-```bash
-python evaluate.py --ref AO24 --plan ao_plan_TIMESTAMP.json --mapping AO24_mapping.json
-```
-
-Affiche la précision globale, par dossier, et le détail des erreurs.
-
----
-
-## Ollama — installation rapide
-
-### macOS
-
-```bash
+# macOS
 brew install ollama
 ollama serve
 ollama pull qwen2.5-coder:7b
-```
 
-### Windows
-
-Télécharger l'installateur sur [ollama.com](https://ollama.com/download/windows), puis dans PowerShell :
-
-```powershell
+# Windows — download installer from https://ollama.com/download/windows, then:
 ollama serve
 ollama pull qwen2.5-coder:7b
 ```
+
+---
+
+## Evaluation workflow
+
+Measure classifier accuracy against a known-good reference folder:
+
+```bash
+# 1. Scramble the reference folder (hides structure from the LLM)
+python scripts/randomize_folder.py AO24
+# → produces AO24_random/ and AO24_mapping.json
+
+# 2. Run the classifier on AO24_random.zip, get ao_plan_TIMESTAMP.json
+
+# 3. Score the result
+python scripts/evaluate.py --ref AO24 --plan ao_plan_TIMESTAMP.json --mapping AO24_mapping.json
+```
+
+---
+
+## Screenshot
+
+> *Demo screenshot — add one here after a test run.*
+
+---
+
+## License
+
+[MIT](LICENSE)

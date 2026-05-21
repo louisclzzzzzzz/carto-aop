@@ -18,9 +18,15 @@ GEMINI_MODELS = [
     "gemini-2.0-flash",
     "gemini-1.5-pro",
     "gemini-2.5-flash-lite",
-    "gemma-3-27b-it",
-    "gemma-3-12b-it",
-    "gemma-3-4b-it",
+    "gemma-4-31b-it"
+]
+
+# Mistral
+MISTRAL_DEFAULT_MODEL = "mistral-small-latest"
+MISTRAL_MODELS = [
+    "mistral-small-latest",
+    "mistral-medium-latest",
+    "mistral-large-latest",
 ]
 OLLAMA_MODELS = [
     "qwen2.5-coder:7b",
@@ -33,7 +39,7 @@ OLLAMA_MODELS = [
 IGNORED_FILENAMES = {
     "thumbs.db", ".ds_store", "desktop.ini", "ehthumbs.db",
 }
-IGNORED_PREFIXES = ("~$",)
+IGNORED_PREFIXES = ("~$", "._")  # ~$ = Office temp, ._ = macOS Apple Double metadata
 
 # Extensions d'archives supportées
 ARCHIVE_EXTENSIONS = {".zip", ".7z", ".rar"}

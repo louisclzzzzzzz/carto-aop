@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 def extract_sample(info: FileInfo) -> str:
     """Retourne un échantillon de contenu pour orienter le classement LLM."""
+    if info.path.name.startswith("._"):
+        return ""
     ext = info.extension
     try:
         if ext == ".pdf":
@@ -24,6 +26,8 @@ def extract_sample(info: FileInfo) -> str:
             return _extract_zip(info.path)
         elif ext == ".7z":
             return _extract_7z(info.path)
+        elif ext in {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}:
+            return _extract_image(info.path)
         else:
             return ""
     except Exception as e:
@@ -63,7 +67,8 @@ def _extract_pdf(path: Path) -> str:
     except Exception as e:
         logger.debug("pdfplumber échoué pour %s : %s", path.name, e)
 
-    return "PDF scanné - OCR non disponible"
+    # Fallback Tesseract OCR (PDF scanné)
+    return _ocr_pdf(path)
 
 
 def _extract_docx(path: Path) -> str:
@@ -107,6 +112,49 @@ def _extract_7z(path: Path) -> str:
         return "Contenu archive 7z :\n" + "\n".join(names[:50])
     except Exception as e:
         return f"[Archive 7z non lisible : {e}]"
+
+
+def _ocr_pdf(path: Path) -> str:
+    """OCR Tesseract sur un PDF scanné via pdf2image."""
+    try:
+        from pdf2image import convert_from_path
+        import pytesseract
+
+        pages = convert_from_path(str(path), dpi=150, first_page=1, last_page=5)
+        text = ""
+        for page_img in pages:
+            text += pytesseract.image_to_string(page_img, lang="fra+eng") or ""
+            if len(text) >= CONTENT_SAMPLE_MAX_CHARS:
+                break
+        text = text.strip()
+        if text:
+            logger.debug("OCR Tesseract réussi pour %s (%d chars)", path.name, len(text))
+            return text[:CONTENT_SAMPLE_MAX_CHARS]
+        return "[PDF scanné — OCR sans résultat]"
+    except ImportError:
+        return "[PDF scanné — installez pdf2image et pytesseract pour l'OCR]"
+    except Exception as e:
+        logger.warning("OCR Tesseract échoué pour %s : %s", path.name, e)
+        return f"[PDF scanné — OCR échoué : {e}]"
+
+
+def _extract_image(path: Path) -> str:
+    """OCR Tesseract sur une image (PNG, JPG, TIFF…)."""
+    try:
+        from PIL import Image
+        import pytesseract
+
+        img = Image.open(str(path))
+        text = pytesseract.image_to_string(img, lang="fra+eng") or ""
+        text = text.strip()
+        if text:
+            return text[:CONTENT_SAMPLE_MAX_CHARS]
+        return "[Image — aucun texte détecté par OCR]"
+    except ImportError:
+        return "[Image — installez Pillow et pytesseract pour l'OCR]"
+    except Exception as e:
+        logger.warning("OCR image échoué pour %s : %s", path.name, e)
+        return f"[Image — OCR échoué : {e}]"
 
 
 def enrich_files(files: list[FileInfo]) -> list[FileInfo]:

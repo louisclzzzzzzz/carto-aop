@@ -18,13 +18,16 @@ if str(_PROJECT_ROOT) not in sys.path:
 import pandas as pd
 import streamlit as st
 
-from ao_classifier.classifier import check_gemini, check_ollama, classify_all
+from ao_classifier.checklist import build_checklist
+from ao_classifier.classifier import check_gemini, check_mistral, check_ollama, classify_all
 from ao_classifier.config import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_MODEL,
     GEMINI_DEFAULT_MODEL,
     GEMINI_MODELS,
+    MISTRAL_DEFAULT_MODEL,
+    MISTRAL_MODELS,
     OLLAMA_BASE_URL,
     OLLAMA_MODELS,
 )
@@ -62,6 +65,7 @@ def run_pipeline(
     threshold: float,
     provider: str = "ollama",
     gemini_api_key: str | None = None,
+    mistral_api_key: str | None = None,
 ):
     """Exécute le pipeline complet et retourne (entries, output_root)."""
     output_root = input_folder.parent / f"{input_folder.name}_organized"
@@ -80,6 +84,7 @@ def run_pipeline(
         confidence_threshold=threshold,
         provider=provider,
         gemini_api_key=gemini_api_key,
+        mistral_api_key=mistral_api_key,
     )
 
     entries = build_plan(results, output_root, threshold)
@@ -132,10 +137,11 @@ with st.sidebar:
 
     provider = st.selectbox(
         "Fournisseur LLM",
-        ["Ollama (local)", "Gemini (cloud)"],
+        ["Ollama (local)", "Gemini (cloud)", "Mistral (cloud)"],
         index=0,
     )
     use_gemini = provider == "Gemini (cloud)"
+    use_mistral = provider == "Mistral (cloud)"
 
     if use_gemini:
         model = st.selectbox(
@@ -149,6 +155,20 @@ with st.sidebar:
             placeholder="AIza...",
             help="Créer une clef sur https://aistudio.google.com/app/apikey",
         )
+        mistral_api_key = None
+    elif use_mistral:
+        model = st.selectbox(
+            "Modèle Mistral",
+            MISTRAL_MODELS,
+            index=MISTRAL_MODELS.index(MISTRAL_DEFAULT_MODEL),
+        )
+        mistral_api_key = st.text_input(
+            "Clef API Mistral",
+            type="password",
+            placeholder="...",
+            help="Créer une clef sur https://console.mistral.ai/api-keys",
+        )
+        gemini_api_key = None
     else:
         model = st.selectbox(
             "Modèle Ollama",
@@ -156,6 +176,7 @@ with st.sidebar:
             index=0,
         )
         gemini_api_key = None
+        mistral_api_key = None
 
     batch_size = st.slider("Taille de batch", 1, 10, DEFAULT_BATCH_SIZE)
     threshold = st.slider(
@@ -172,17 +193,26 @@ with st.sidebar:
                 st.error("✗ Clef Gemini invalide ou réseau inaccessible")
         else:
             st.warning("Saisir une clef API Gemini")
+    elif use_mistral:
+        if mistral_api_key:
+            if check_mistral(mistral_api_key):
+                st.success("✓ Clef Mistral valide")
+            else:
+                st.error("✗ Clef Mistral invalide ou réseau inaccessible")
+        else:
+            st.warning("Saisir une clef API Mistral")
     else:
         if check_ollama(OLLAMA_BASE_URL):
             st.success("✓ Ollama accessible")
         else:
             st.error("✗ Ollama injoignable\n\n`ollama serve`")
 
-_upload_help = (
-    "Le contenu sera analysé localement, rien n'est envoyé sur internet."
-    if not use_gemini
-    else "Le contenu sera envoyé à l'API Gemini (Google) pour classification."
-)
+if use_gemini:
+    _upload_help = "Le contenu sera envoyé à l'API Gemini (Google) pour classification."
+elif use_mistral:
+    _upload_help = "Le contenu sera envoyé à l'API Mistral (cloud) pour classification."
+else:
+    _upload_help = "Le contenu sera analysé localement, rien n'est envoyé sur internet."
 uploaded = st.file_uploader(
     "Glisse-dépose un ZIP",
     type=["zip"],
@@ -213,10 +243,17 @@ with tempfile.TemporaryDirectory(prefix="ao_gui_") as tmp:
         "(peut prendre plusieurs minutes selon le modèle)"
     ):
         try:
+            if use_gemini:
+                _provider = "gemini"
+            elif use_mistral:
+                _provider = "mistral"
+            else:
+                _provider = "ollama"
             entries, output_root = run_pipeline(
                 input_folder, model, batch_size, threshold,
-                provider="gemini" if use_gemini else "ollama",
+                provider=_provider,
                 gemini_api_key=gemini_api_key,
+                mistral_api_key=mistral_api_key,
             )
         except Exception as exc:
             st.error(f"Erreur pendant l'analyse : {exc}")
@@ -297,6 +334,47 @@ with tempfile.TemporaryDirectory(prefix="ao_gui_") as tmp:
             ["Fichier source", "Raison"]
         ]
         st.dataframe(df_dup, hide_index=True, use_container_width=True)
+
+    # ─── Checklist pièces obligatoires ──────────────────────────────────────
+    st.divider()
+    st.subheader("✅ Checklist des pièces requises (polices de chantier)")
+
+    checklist = build_checklist(entries)
+    phases = ["Constitution du dossier", "Établissement du contrat", "Réception du chantier"]
+
+    total_obl = sum(1 for r in checklist if r.piece.obligatoire)
+    found_obl = sum(1 for r in checklist if r.piece.obligatoire and r.found)
+    total_opt = sum(1 for r in checklist if not r.piece.obligatoire)
+    found_opt = sum(1 for r in checklist if not r.piece.obligatoire and r.found)
+
+    ck1, ck2, ck3 = st.columns(3)
+    ck1.metric("Pièces obligatoires trouvées", f"{found_obl} / {total_obl}")
+    ck2.metric("Pièces optionnelles trouvées", f"{found_opt} / {total_opt}")
+    missing_obl = total_obl - found_obl
+    ck3.metric(
+        "Pièces obligatoires manquantes",
+        missing_obl,
+        delta=f"-{missing_obl}" if missing_obl else None,
+        delta_color="inverse",
+    )
+
+    for phase in phases:
+        phase_results = [r for r in checklist if r.piece.phase == phase]
+        found_count = sum(1 for r in phase_results if r.found)
+        with st.expander(f"**{phase}** — {found_count}/{len(phase_results)} trouvée(s)", expanded=True):
+            for result in phase_results:
+                icon = "✅" if result.found else ("⚠️" if not result.piece.obligatoire else "❌")
+                label = result.piece.label
+                if not result.piece.obligatoire:
+                    label += " *(si applicable)*"
+                col_a, col_b = st.columns([3, 4])
+                col_a.markdown(f"{icon} {label}")
+                if result.found:
+                    preview = result.matching_files[0] if result.matching_files else ""
+                    extra = f" +{len(result.matching_files)-1}" if len(result.matching_files) > 1 else ""
+                    col_b.caption(f"`{preview}`{extra}")
+                else:
+                    col_b.caption("*Non trouvé*")
 
     # ─── Export ─────────────────────────────────────────────────────────────
     st.divider()

@@ -29,6 +29,7 @@ fake_ao_test/
 fake_ao_test2/
 AO24/
 AO24_random/
+AO24_random_organized_ollama/
 *.zip
 
 # OS
@@ -42,4 +43,6 @@ Thumbs.db
 
 # Env
 .env
-.env.example
+
+# R artifacts
+.Rhistory

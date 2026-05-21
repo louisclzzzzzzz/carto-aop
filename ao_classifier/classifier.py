@@ -1,4 +1,4 @@
-"""Classement LLM des fichiers — backends Ollama et Gemini."""
+"""Classement LLM des fichiers — backends Ollama, Gemini et Mistral."""
 
 import json
 import logging
@@ -18,6 +18,7 @@ from ao_classifier.config import (
     GLOSSAIRE,
     LLM_MAX_RETRIES,
     LLM_TIMEOUT_SECONDS,
+    MISTRAL_DEFAULT_MODEL,
     OLLAMA_BASE_URL,
 )
 from ao_classifier.scanner import FileInfo
@@ -46,6 +47,17 @@ def check_ollama(base_url: str = OLLAMA_BASE_URL) -> bool:
         return False
 
 
+def check_mistral(api_key: str) -> bool:
+    """Vérifie que la clef API Mistral est valide."""
+    try:
+        from mistralai import Mistral
+        client = Mistral(api_key=api_key)
+        client.models.list()
+        return True
+    except Exception:
+        return False
+
+
 def check_gemini(api_key: str) -> bool:
     """Vérifie que la clef API Gemini est valide."""
     try:
@@ -56,6 +68,17 @@ def check_gemini(api_key: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def _call_mistral(prompt: str, model: str, api_key: str) -> str:
+    from mistralai import Mistral
+    client = Mistral(api_key=api_key)
+    response = client.chat.complete(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.1,
+    )
+    return response.choices[0].message.content
 
 
 def _call_gemini(prompt: str, model: str, api_key: str) -> str:
@@ -153,6 +176,7 @@ def _classify_batch(
     arbo_template_text: str | None = None,
     provider: str = "ollama",
     gemini_api_key: str | None = None,
+    mistral_api_key: str | None = None,
 ) -> list[ClassificationResult]:
     prompt = _build_prompt(batch, arbo_template_text)
     raw = ""
@@ -161,6 +185,8 @@ def _classify_batch(
         try:
             if provider == "gemini":
                 raw = _call_gemini(prompt, model, gemini_api_key or "")
+            elif provider == "mistral":
+                raw = _call_mistral(prompt, model, mistral_api_key or "")
             else:
                 raw = _call_ollama(prompt, model, base_url)
             break
@@ -267,8 +293,9 @@ def classify_all(
     confidence_threshold: float = 0.7,
     provider: str = "ollama",
     gemini_api_key: str | None = None,
+    mistral_api_key: str | None = None,
 ) -> list[ClassificationResult]:
-    """Classifie tous les fichiers via Ollama ou Gemini par batchs."""
+    """Classifie tous les fichiers via Ollama, Gemini ou Mistral par batchs."""
     results: list[ClassificationResult] = []
 
     # Les doublons ne passent pas par le LLM
@@ -297,7 +324,9 @@ def classify_all(
         )
         batch_results = _classify_batch(
             batch, model, base_url, confidence_threshold,
-            provider=provider, gemini_api_key=gemini_api_key,
+            provider=provider,
+            gemini_api_key=gemini_api_key,
+            mistral_api_key=mistral_api_key,
         )
         results.extend(batch_results)
 

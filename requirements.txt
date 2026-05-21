@@ -8,3 +8,7 @@ requests>=2.31.0
 streamlit>=1.30.0
 pandas>=2.0.0
 google-generativeai>=0.8.0
+mistralai>=1.0.0
+pytesseract>=0.3.10
+pdf2image>=1.17.0
+Pillow>=10.0.0
